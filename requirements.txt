@@ -2,4 +2,9 @@
 torch<2.1.0
 librosa
 transformers
+streamlit
+numpy
+scipy
+soundfile
+# Install diffusers from the Git repository
 git+https://github.com/huggingface/diffusers.git
