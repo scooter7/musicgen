@@ -1,10 +1,21 @@
---extra-index-url https://download.pytorch.org/whl/cu113
-torch<2.1.0
-librosa
-transformers
-streamlit
+av
+einops
+flashy>=0.0.1
+hydra-core>=1.1
+hydra_colorlog
+julius
+num2words
 numpy
-scipy
-soundfile
-# Install diffusers from the Git repository
-git+https://github.com/huggingface/diffusers.git
+sentencepiece
+spacy==3.5.2
+torch>=2.0.0
+torchaudio>=2.0.0
+huggingface_hub
+tqdm
+transformers>=4.31.0  # need Encodec there.
+xformers
+demucs
+librosa
+gradio
+torchmetrics
+encodec
