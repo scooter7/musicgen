@@ -1,72 +1,44 @@
-from audiocraft.models import MusicGen
 import streamlit as st
 import torch
-import torchaudio
-import os
+from diffusers import AudioLDM2Pipeline
 import numpy as np
-import base64
-import librosa  # For MP3 conversion if necessary
+from io import BytesIO
 
-@st.cache_resource
-def load_model():
-    model = MusicGen.get_pretrained('facebook/musicgen-small')
-    return model
+# Set up device and load pipeline
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch_dtype = torch.float16 if device == "cuda" else torch.float32
+repo_id = "cvssp/audioldm2"
+pipe = AudioLDM2Pipeline.from_pretrained(repo_id, torch_dtype=torch_dtype).to(device)
+generator = torch.Generator(device)
 
-def generate_music_tensors(description, genre, mood, tempo, duration: int):
-    description = f"{genre}, {mood}, {tempo} BPM, {description}"
-    print("Description: ", description)
-    print("Duration: ", duration)
-    model = load_model()
+def text2audio(text, negative_prompt, duration, guidance_scale, random_seed, n_candidates):
+    generator.manual_seed(int(random_seed))
+    waveforms = pipe(text, audio_length_in_s=duration, guidance_scale=guidance_scale,
+                     num_inference_steps=200, negative_prompt=negative_prompt,
+                     num_waveforms_per_prompt=n_candidates, generator=generator)["audios"]
+    return waveforms[0]
 
-    model.set_generation_params(
-        use_sampling=True,
-        top_k=250,
-        duration=duration
-    )
+# Streamlit UI
+st.title("AudioLDM 2: A General Framework for Audio, Music, and Speech Generation")
 
-    output = model.generate(
-        descriptions=[description],
-        progress=True,
-        return_tokens=True
-    )
+# Input form
+with st.form("text2audio_form"):
+    text = st.text_input("Input text", value="The vibrant beat of Brazilian samba drums.")
+    negative_prompt = st.text_input("Negative prompt", value="Low quality.")
+    duration = st.slider("Duration (seconds)", 5, 15, value=10, step=2.5)
+    guidance_scale = st.slider("Guidance scale", 0.0, 7.0, value=3.5, step=0.5)
+    seed = st.number_input("Seed", value=45)
+    n_candidates = st.slider("Number of waveforms to generate", 1, 5, value=3)
+    submit_button = st.form_submit_button(label="Submit")
 
-    return output[0]
+if submit_button:
+    waveform = text2audio(text, negative_prompt, duration, guidance_scale, seed, n_candidates)
+    waveform = np.asarray(waveform).astype(np.float32)
 
-def save_audio(samples: torch.Tensor):
-    print("Samples (inside function): ", samples)
-    sample_rate = 32000
-    save_path = "audio_output/"
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    audio_path = os.path.join(save_path, "audio_0.mp3")  # Assuming single output for simplicity
+    audio_file = BytesIO()
+    torch.save(waveform, audio_file)
+    audio_file.seek(0)
 
-    torchaudio.save(audio_path, samples.detach().cpu(), sample_rate)
-    # If necessary, use librosa or another library to convert WAV to MP3 here
-    return audio_path
+    st.audio(audio_file, format="audio/wav")
 
-def get_binary_file_downloader_html(bin_file, file_label='File'):
-    with open(bin_file, 'rb') as f:
-        data = f.read()
-    bin_str = base64.b64encode(data).decode()
-    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}">Download {file_label}</a>'
-    return href
-
-def main():
-    st.title("AI Music Generator")
-
-    genre = st.selectbox('Select Genre', ['Rock', 'Jazz', 'Hip Hop', 'Electronic'])
-    mood = st.selectbox('Select Mood', ['Happy', 'Sad', 'Energetic', 'Calm'])
-    tempo = st.slider('Tempo (BPM)', 60, 180, 120)
-    description = st.text_area("Enter your description:")
-    duration = st.slider("Duration (In Seconds)", 0, 20, 10)
-
-    if st.button("Generate Music"):
-        music_tensor = generate_music_tensors(description, genre, mood, tempo, duration)
-        audio_path = save_audio(music_tensor)
-        audio_file = open(audio_path, 'rb')
-        audio_bytes = audio_file.read()
-        st.audio(audio_bytes, format='audio/mp3')
-        st.markdown(get_binary_file_downloader_html(audio_path, 'MP3'), unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+# Additional tips or information can be added here similarly to how it's done in the Gradio app
