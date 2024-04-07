@@ -1,44 +1,98 @@
-import streamlit as st
-import torch
-from diffusers import AudioLDM2Pipeline
+from audiocraft.models import MusicGen
+import streamlit as st 
+import torch 
+import torchaudio
+import os 
 import numpy as np
-from io import BytesIO
+import base64
 
-# Set up device and load pipeline
-device = "cuda" if torch.cuda.is_available() else "cpu"
-torch_dtype = torch.float16 if device == "cuda" else torch.float32
-repo_id = "cvssp/audioldm2"
-pipe = AudioLDM2Pipeline.from_pretrained(repo_id, torch_dtype=torch_dtype).to(device)
-generator = torch.Generator(device)
+@st.cache_resource
+def load_model():
+    model = MusicGen.get_pretrained('facebook/musicgen-small')
+    return model
 
-def text2audio(text, negative_prompt, duration, guidance_scale, random_seed, n_candidates):
-    generator.manual_seed(int(random_seed))
-    waveforms = pipe(text, audio_length_in_s=duration, guidance_scale=guidance_scale,
-                     num_inference_steps=200, negative_prompt=negative_prompt,
-                     num_waveforms_per_prompt=n_candidates, generator=generator)["audios"]
-    return waveforms[0]
+def generate_music_tensors(description, duration: int):
+    print("Description: ", description)
+    print("Duration: ", duration)
+    model = load_model()
 
-# Streamlit UI
-st.title("AudioLDM 2: A General Framework for Audio, Music, and Speech Generation")
+    model.set_generation_params(
+        use_sampling=True,
+        top_k=250,
+        duration=duration
+    )
 
-# Input form
-with st.form("text2audio_form"):
-    text = st.text_input("Input text", value="The vibrant beat of Brazilian samba drums.")
-    negative_prompt = st.text_input("Negative prompt", value="Low quality.")
-    duration = st.slider("Duration (seconds)", 5, 15, value=10, step=2.5)
-    guidance_scale = st.slider("Guidance scale", 0.0, 7.0, value=3.5, step=0.5)
-    seed = st.number_input("Seed", value=45)
-    n_candidates = st.slider("Number of waveforms to generate", 1, 5, value=3)
-    submit_button = st.form_submit_button(label="Submit")
+    output = model.generate(
+        descriptions=[description],
+        progress=True,
+        return_tokens=True
+    )
 
-if submit_button:
-    waveform = text2audio(text, negative_prompt, duration, guidance_scale, seed, n_candidates)
-    waveform = np.asarray(waveform).astype(np.float32)
+    return output[0]
 
-    audio_file = BytesIO()
-    torch.save(waveform, audio_file)
-    audio_file.seek(0)
 
-    st.audio(audio_file, format="audio/wav")
+def save_audio(samples: torch.Tensor):
+    """Renders an audio player for the given audio samples and saves them to a local directory.
 
-# Additional tips or information can be added here similarly to how it's done in the Gradio app
+    Args:
+        samples (torch.Tensor): a Tensor of decoded audio samples
+            with shapes [B, C, T] or [C, T]
+        sample_rate (int): sample rate audio should be displayed with.
+        save_path (str): path to the directory where audio should be saved.
+    """
+
+    print("Samples (inside function): ", samples)
+    sample_rate = 32000
+    save_path = "audio_output/"
+    assert samples.dim() == 2 or samples.dim() == 3
+
+    samples = samples.detach().cpu()
+    if samples.dim() == 2:
+        samples = samples[None, ...]
+
+    for idx, audio in enumerate(samples):
+        audio_path = os.path.join(save_path, f"audio_{idx}.wav")
+        torchaudio.save(audio_path, audio, sample_rate)
+
+def get_binary_file_downloader_html(bin_file, file_label='File'):
+    with open(bin_file, 'rb') as f:
+        data = f.read()
+    bin_str = base64.b64encode(data).decode()
+    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}">Download {file_label}</a>'
+    return href
+
+st.set_page_config(
+    page_icon= "musical_note",
+    page_title= "Music Gen"
+)
+
+def main():
+
+    st.title("Text to Music Generator🎵")
+
+    with st.expander("See explanation"):
+        st.write("Music Generator app built using Meta's Audiocraft library. We are using Music Gen Small model.")
+
+    text_area = st.text_area("Enter your description.......")
+    time_slider = st.slider("Select time duration (In Seconds)", 0, 20, 10)
+
+    if text_area and time_slider:
+        st.json({
+            'Your Description': text_area,
+            'Selected Time Duration (in Seconds)': time_slider
+        })
+
+        st.subheader("Generated Music")
+        music_tensors = generate_music_tensors(text_area, time_slider)
+        print("Musci Tensors: ", music_tensors)
+        save_music_file = save_audio(music_tensors)
+        audio_filepath = 'audio_output/audio_0.wav'
+        audio_file = open(audio_filepath, 'rb')
+        audio_bytes = audio_file.read()
+        st.audio(audio_bytes)
+        st.markdown(get_binary_file_downloader_html(audio_filepath, 'Audio'), unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    main()
+    
