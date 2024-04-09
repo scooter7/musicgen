@@ -5,12 +5,12 @@ import numpy as np
 from pydub import AudioSegment
 from io import BytesIO
 
-@st.experimental_singleton
+@st.cache_resource
 def load_model():
     model = MusicGen.get_pretrained('facebook/musicgen-small')
     return model
 
-@st.experimental_memo
+@st.cache_data
 def generate_music_tensors(description, duration: int):
     model = load_model()
     model.set_generation_params(
